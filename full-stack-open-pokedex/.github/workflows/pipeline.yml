@@ -1,0 +1,133 @@
+name: Deployment Pipeline
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize]
+
+jobs:
+
+  avoid-redundancy:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Cancel previous redundant builds
+        uses: styfle/cancel-workflow-action@0.10.1
+        with:
+          access_token: ${{ github.token }}
+
+  install:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v3
+        with:
+          cache: 'npm'
+          node-version: 16
+      - name: Install dependencies
+        run: npm ci
+
+  lint:
+    needs: install
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v3
+        with:
+          cache: 'npm'
+          node-version: 16
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run eslint
+
+  build:
+    needs: install
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v3
+        with:
+          cache: 'npm'
+          node-version: 16
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - uses: actions/upload-artifact@v3
+        with:
+          name: dist
+          path: dist
+
+  test:
+    needs: [lint, build]
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v3
+        with:
+          cache: 'npm'
+          node-version: 16
+      - name: Install dependencies
+        run: npm ci
+      - uses: actions/download-artifact@v3
+        with:
+          name: dist
+          path: dist
+      - name: Test
+        run: npm test
+
+  e2e:
+    needs: [lint, build]
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v3
+        with:
+          cache: 'npm'
+          node-version: 16
+      - name: Install dependencies
+        run: npm ci
+      - uses: actions/download-artifact@v3
+        with:
+          name: dist
+          path: dist
+      - name: E2E tests
+        uses: cypress-io/github-action@v4
+        with:
+          build: npm run build
+          start: npm run start:test
+          wait-on: http://localhost:5000
+
+  deploy:
+    needs: [test, e2e]
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v3
+        with:
+          name: dist
+          path: dist
+      - name: Deploy to Heroku
+        if: ${{ github.event_name == 'push' }}
+        uses: akhileshns/heroku-deploy@v3.12.12
+        with:
+          heroku_api_key: ${{secrets.HEROKU_API_KEY}}
+          heroku_app_name: ${{secrets.HEROKU_APP}}
+          heroku_email: ${{secrets.HEROKU_API_EMAIL}}
+          healthcheck: "https://${{secrets.HEROKU_APP}}.herokuapp.com/health"
+          rollbackonhealthcheckfailed: true
